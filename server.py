@@ -20,6 +20,9 @@ import socket
 import sqlite3
 import threading
 import time
+import base64
+import urllib.request
+import urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
@@ -29,6 +32,19 @@ LOCK = threading.Lock()
 EMAIL_RE = re.compile(r'^[^\s@]+@[^\s@]+\.[^\s@]+$')
 PORT = int(os.environ.get('PORT', 8000))
 ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', 'rayenrayen123')
+
+# --- Sauvegarde optionnelle vers GitHub (via l'API GitHub, aucune dependance) ---
+# A configurer via variables d'environnement (jamais dans le code) :
+#   GITHUB_TOKEN            token d'acces personnel avec droit "contents: write"
+#   GITHUB_REPO             "monpseudo/mon-depot"
+#   GITHUB_BRANCH           branche cible (defaut: main)
+#   GITHUB_BACKUP_PATH      chemin du fichier dans le depot (defaut: backups/members.json)
+#   BACKUP_INTERVAL_MINUTES sauvegarde automatique toutes les N minutes (0 = desactive)
+GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN')
+GITHUB_REPO = os.environ.get('GITHUB_REPO')
+GITHUB_BRANCH = os.environ.get('GITHUB_BRANCH', 'main')
+GITHUB_BACKUP_PATH = os.environ.get('GITHUB_BACKUP_PATH', 'backups/members.json')
+BACKUP_INTERVAL_MINUTES = int(os.environ.get('BACKUP_INTERVAL_MINUTES', '0'))
 
 
 def get_conn():
@@ -163,6 +179,60 @@ def admin_delete_member(code):
     conn.execute('DELETE FROM members WHERE code=?', (code,))
     conn.commit()
     conn.close()
+
+
+def github_backup():
+    """Envoie un instantane JSON de tous les membres vers un fichier dans un
+    depot GitHub, via l'API Contents (creation ou mise a jour du fichier)."""
+    if not GITHUB_TOKEN or not GITHUB_REPO:
+        return False, "Sauvegarde GitHub non configuree (GITHUB_TOKEN / GITHUB_REPO manquants)."
+
+    try:
+        with LOCK:
+            members = get_all_members()
+        content_bytes = json.dumps(members, ensure_ascii=False, indent=2).encode('utf-8')
+        content_b64 = base64.b64encode(content_bytes).decode('ascii')
+
+        api_url = f'https://api.github.com/repos/{GITHUB_REPO}/contents/{GITHUB_BACKUP_PATH}'
+        headers = {
+            'Authorization': f'token {GITHUB_TOKEN}',
+            'Accept': 'application/vnd.github+json',
+            'User-Agent': 'club-robotique-enim-backup',
+        }
+
+        # Recuperer le sha du fichier existant (necessaire pour le mettre a jour)
+        sha = None
+        get_req = urllib.request.Request(f'{api_url}?ref={GITHUB_BRANCH}', headers=headers)
+        try:
+            with urllib.request.urlopen(get_req, timeout=15) as resp:
+                sha = json.loads(resp.read().decode('utf-8')).get('sha')
+        except urllib.error.HTTPError as e:
+            if e.code != 404:
+                raise
+
+        body = {
+            'message': f'Backup membres ({time.strftime("%Y-%m-%d %H:%M:%S")}) - {len(members)} membre(s)',
+            'content': content_b64,
+            'branch': GITHUB_BRANCH,
+        }
+        if sha:
+            body['sha'] = sha
+
+        put_req = urllib.request.Request(
+            api_url,
+            data=json.dumps(body).encode('utf-8'),
+            headers={**headers, 'Content-Type': 'application/json'},
+            method='PUT',
+        )
+        with urllib.request.urlopen(put_req, timeout=15) as resp:
+            resp.read()
+
+        return True, f'Sauvegarde envoyee sur GitHub : {GITHUB_REPO}/{GITHUB_BACKUP_PATH} ({len(members)} membre(s)).'
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode('utf-8', 'ignore') if hasattr(e, 'read') else ''
+        return False, f'Erreur GitHub ({e.code}): {detail[:200]}'
+    except Exception as e:
+        return False, f'Erreur de sauvegarde GitHub : {e}'
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -360,6 +430,15 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({'ok': True})
             return
 
+        if path == '/api/admin/backup-github':
+            payload = self._read_json()
+            if payload.get('password') != ADMIN_PASSWORD:
+                self._send_json({'error': 'Mot de passe incorrect.'}, 401)
+                return
+            ok, message = github_backup()
+            self._send_json({'ok': ok, 'message': message}, 200 if ok else 400)
+            return
+
         if path == '/api/checkpoint':
             payload = self._read_json()
             code = (payload.get('code') or '').strip().upper()
@@ -393,8 +472,18 @@ def get_lan_ip():
     return ip
 
 
+def backup_loop():
+    while True:
+        time.sleep(BACKUP_INTERVAL_MINUTES * 60)
+        ok, message = github_backup()
+        print(('[backup GitHub OK] ' if ok else '[backup GitHub ERREUR] ') + message)
+
+
 if __name__ == '__main__':
     init_db()
+    if BACKUP_INTERVAL_MINUTES > 0 and GITHUB_TOKEN and GITHUB_REPO:
+        threading.Thread(target=backup_loop, daemon=True).start()
+        print(f'  Sauvegarde automatique GitHub activee toutes les {BACKUP_INTERVAL_MINUTES} min')
     server = ThreadingHTTPServer(('0.0.0.0', PORT), Handler)
     ip = get_lan_ip()
     print('=' * 56)

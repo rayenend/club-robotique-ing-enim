@@ -97,6 +97,40 @@ l'exporter en CSV/Excel, ou la requeter directement.
 Pour repartir de zero un autre jour : supprimer members.db avant de
 relancer le serveur (une nouvelle base vide sera recreee automatiquement).
 
+SAUVEGARDE AUTOMATIQUE VERS GITHUB (optionnel)
+------------------------------------------------
+Le site peut envoyer une copie de toutes les donnees des membres (au
+format JSON) vers un fichier dans un depot GitHub -- pratique si le
+site est ferme, redemarre, ou perd son disque (cas du plan gratuit
+Render). C'est une sauvegarde en plus de members.db, pas un
+remplacement.
+
+Mise en place (une seule fois) :
+  1. Sur GitHub, creer (ou choisir) un depot ou stocker la sauvegarde.
+  2. Creer un token d'acces : Settings -> Developer settings ->
+     Fine-grained tokens -> Generate new token, avec l'acces
+     "Contents: Read and write" limite a ce depot.
+  3. Definir ces variables d'environnement (dans Render : onglet
+     "Environment" du service ; en local : avant de lancer
+     server.py) :
+       GITHUB_TOKEN            = le token cree ci-dessus (secret !)
+       GITHUB_REPO             = ton-pseudo/ton-depot
+       GITHUB_BRANCH           = main               (optionnel)
+       GITHUB_BACKUP_PATH      = backups/members.json (optionnel)
+       BACKUP_INTERVAL_MINUTES = 10                  (optionnel,
+                                  0 ou absent = pas de sauvegarde
+                                  automatique periodique)
+
+Utilisation :
+  - Sauvegarde manuelle : onglet "Admin" (mot de passe requis) ->
+    bouton "Sauvegarder sur GitHub". Un fichier backups/members.json
+    est cree ou mis a jour dans le depot a chaque clic.
+  - Sauvegarde automatique : si BACKUP_INTERVAL_MINUTES est defini,
+    le serveur pousse une sauvegarde toutes les N minutes tant qu'il
+    tourne, sans action de ta part.
+  - Ne jamais mettre GITHUB_TOKEN directement dans le code ou sur
+    GitHub -- toujours via les variables d'environnement.
+
 FAIRE HEBERGER LE SITE EN PERMANENCE (toujours en ligne, pas seulement un jour)
 --------------------------------------------------------------------------------
 Le tunnel (section ci-dessus) marche seulement quand ton PC est allume et

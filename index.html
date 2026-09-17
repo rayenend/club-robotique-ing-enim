@@ -215,6 +215,7 @@ th{color:var(--muted);font-size:.72rem;text-transform:uppercase;}
       </div>
       <div id="admin-panel-content" style="display:none;">
         <div class="admin-toolbar">
+          <button class="btn-sm" onclick="adminBackupGithub()">☁️ Sauvegarder sur GitHub</button>
           <button class="btn-sm" onclick="adminLogout()">🔒 Se déconnecter</button>
         </div>
         <div id="admin-secure-msg"></div>
@@ -522,6 +523,24 @@ async function adminDelete(code){
     }
     msg.innerHTML = '<div class="msg ok">Membre supprimé.</div>';
     refreshLists();
+  }catch(e){
+    msg.innerHTML = '<div class="msg err">Serveur local introuvable.</div>';
+    setConn(false);
+  }
+}
+
+async function adminBackupGithub(){
+  const msg = document.getElementById('admin-secure-msg');
+  msg.innerHTML = '<div class="msg ok">Sauvegarde en cours...</div>';
+  try{
+    const r = await fetch(API+'/api/admin/backup-github', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({password: adminPassword})});
+    const d = await r.json();
+    if(!r.ok || !d.ok){
+      if(r.status === 401){ msg.innerHTML = '<div class="msg err">Session admin invalide, reconnectez-vous.</div>'; adminLogout(); return; }
+      msg.innerHTML = '<div class="msg err">'+(d.message||d.error||'Erreur lors de la sauvegarde.')+'</div>';
+      return;
+    }
+    msg.innerHTML = '<div class="msg ok">'+d.message+'</div>';
   }catch(e){
     msg.innerHTML = '<div class="msg err">Serveur local introuvable.</div>';
     setConn(false);
