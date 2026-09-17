@@ -38,12 +38,12 @@ ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', 'rayenrayen123')
 #   GITHUB_TOKEN            token d'acces personnel avec droit "contents: write"
 #   GITHUB_REPO             "monpseudo/mon-depot"
 #   GITHUB_BRANCH           branche cible (defaut: main)
-#   GITHUB_BACKUP_PATH      chemin du fichier dans le depot (defaut: backups/members.json)
+#   GITHUB_BACKUP_PATH      chemin du fichier dans le depot (defaut: members.json, a la racine)
 #   BACKUP_INTERVAL_MINUTES sauvegarde automatique toutes les N minutes (0 = desactive)
 GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN')
 GITHUB_REPO = os.environ.get('GITHUB_REPO')
 GITHUB_BRANCH = os.environ.get('GITHUB_BRANCH', 'main')
-GITHUB_BACKUP_PATH = os.environ.get('GITHUB_BACKUP_PATH', 'backups/members.json')
+GITHUB_BACKUP_PATH = os.environ.get('GITHUB_BACKUP_PATH', 'members.json')
 BACKUP_INTERVAL_MINUTES = int(os.environ.get('BACKUP_INTERVAL_MINUTES', '0'))
 
 
