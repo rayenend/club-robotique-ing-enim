@@ -24,10 +24,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_FILE = os.path.join(BASE_DIR, 'members.db')
+DB_FILE = os.environ.get('DB_PATH') or os.path.join(BASE_DIR, 'members.db')
 LOCK = threading.Lock()
 EMAIL_RE = re.compile(r'^[^\s@]+@[^\s@]+\.[^\s@]+$')
-PORT = 8000
+PORT = int(os.environ.get('PORT', 8000))
+ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', 'rayenrayen123')
 
 
 def get_conn():
@@ -118,6 +119,48 @@ def update_checkpoint(code, team):
     col_at = 'electrique_at' if team == 'electrique' else 'mecanique_at'
     conn = get_conn()
     conn.execute(f'UPDATE members SET {col_done}=1, {col_at}=? WHERE code=?', (int(time.time() * 1000), code))
+    conn.commit()
+    conn.close()
+
+
+def admin_update_member(code, fields):
+    """fields: dict with any of firstName,lastName,phone,email,study,pc,
+    electrique (bool), mecanique (bool)."""
+    sets = []
+    values = []
+    col_map = {
+        'firstName': 'first_name', 'lastName': 'last_name', 'phone': 'phone',
+        'email': 'email', 'study': 'study', 'pc': 'pc',
+    }
+    for key, col in col_map.items():
+        if key in fields:
+            sets.append(f'{col}=?')
+            values.append(fields[key])
+
+    now = int(time.time() * 1000)
+    if 'electrique' in fields:
+        sets.append('electrique_done=?')
+        values.append(1 if fields['electrique'] else 0)
+        sets.append('electrique_at=?')
+        values.append(now if fields['electrique'] else None)
+    if 'mecanique' in fields:
+        sets.append('mecanique_done=?')
+        values.append(1 if fields['mecanique'] else 0)
+        sets.append('mecanique_at=?')
+        values.append(now if fields['mecanique'] else None)
+
+    if not sets:
+        return
+    values.append(code)
+    conn = get_conn()
+    conn.execute(f'UPDATE members SET {", ".join(sets)} WHERE code=?', values)
+    conn.commit()
+    conn.close()
+
+
+def admin_delete_member(code):
+    conn = get_conn()
+    conn.execute('DELETE FROM members WHERE code=?', (code,))
     conn.commit()
     conn.close()
 
@@ -241,6 +284,80 @@ class Handler(BaseHTTPRequestHandler):
                 }
                 insert_member(member)
             self._send_json(member)
+            return
+
+        if path == '/api/admin/verify':
+            payload = self._read_json()
+            if payload.get('password') != ADMIN_PASSWORD:
+                self._send_json({'error': 'Mot de passe incorrect.'}, 401)
+                return
+            self._send_json({'ok': True})
+            return
+
+        if path == '/api/admin/update':
+            payload = self._read_json()
+            if payload.get('password') != ADMIN_PASSWORD:
+                self._send_json({'error': 'Mot de passe incorrect.'}, 401)
+                return
+            code = (payload.get('code') or '').strip().upper()
+            if not code:
+                self._send_json({'error': 'Code manquant.'}, 400)
+                return
+
+            fields = {}
+            for key in ('firstName', 'lastName', 'study', 'pc'):
+                if key in payload:
+                    val = (payload.get(key) or '').strip()
+                    if not val:
+                        self._send_json({'error': 'Tous les champs texte sont obligatoires.'}, 400)
+                        return
+                    fields[key] = val
+
+            if 'phone' in payload:
+                clean_phone = re.sub(r'\s+', '', payload.get('phone') or '')
+                clean_phone = re.sub(r'^(\+216|216)', '', clean_phone)
+                if not re.match(r'^\d{8}$', clean_phone):
+                    self._send_json(
+                        {'error': "Le numéro de téléphone doit contenir exactement 8 chiffres (sans +216)."}, 400
+                    )
+                    return
+                fields['phone'] = clean_phone
+
+            if 'email' in payload:
+                email = (payload.get('email') or '').strip()
+                if not email or not EMAIL_RE.match(email):
+                    self._send_json({'error': "Veuillez entrer une adresse email valide."}, 400)
+                    return
+                fields['email'] = email
+
+            if 'electrique' in payload:
+                fields['electrique'] = bool(payload.get('electrique'))
+            if 'mecanique' in payload:
+                fields['mecanique'] = bool(payload.get('mecanique'))
+
+            with LOCK:
+                member = get_member(code)
+                if not member:
+                    self._send_json({'error': 'Code introuvable.'}, 404)
+                    return
+                admin_update_member(code, fields)
+                member = get_member(code)
+            self._send_json(member)
+            return
+
+        if path == '/api/admin/delete':
+            payload = self._read_json()
+            if payload.get('password') != ADMIN_PASSWORD:
+                self._send_json({'error': 'Mot de passe incorrect.'}, 401)
+                return
+            code = (payload.get('code') or '').strip().upper()
+            with LOCK:
+                member = get_member(code)
+                if not member:
+                    self._send_json({'error': 'Code introuvable.'}, 404)
+                    return
+                admin_delete_member(code)
+            self._send_json({'ok': True})
             return
 
         if path == '/api/checkpoint':

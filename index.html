@@ -81,6 +81,18 @@ th{color:var(--muted);font-size:.72rem;text-transform:uppercase;}
 .note{font-size:.75rem;color:var(--muted);text-align:center;margin-top:20px;}
 .conn{font-size:.72rem;text-align:center;margin-top:8px;color:var(--muted);}
 .conn.bad{color:var(--danger);}
+.lockbox{max-width:340px;margin:10px auto 0;text-align:center;}
+.lockbox .lock-icon{font-size:2.2rem;margin-bottom:6px;}
+.btn-sm{padding:5px 10px;border-radius:6px;border:1px solid var(--border);background:var(--card2);color:var(--text);font-size:.72rem;font-weight:700;cursor:pointer;margin-right:4px;transition:.15s;}
+.btn-sm:hover{border-color:var(--cyan);}
+.btn-sm.danger{color:var(--danger);border-color:var(--danger);}
+.btn-sm.danger:hover{background:rgba(255,45,85,.12);}
+.btn-sm.ok{color:var(--ok);border-color:var(--ok);}
+.btn-sm.ok:hover{background:rgba(46,204,113,.12);}
+.edit-input{width:90px;padding:5px 6px;border-radius:6px;border:1px solid var(--border);background:var(--card2);color:var(--text);font-size:.78rem;}
+.edit-cell{display:flex;flex-direction:column;gap:3px;}
+.edit-check{display:flex;align-items:center;gap:4px;font-size:.72rem;color:var(--muted);}
+.admin-toolbar{display:flex;justify-content:flex-end;margin-bottom:8px;}
 </style>
 </head>
 <body>
@@ -99,6 +111,7 @@ th{color:var(--muted);font-size:.72rem;text-transform:uppercase;}
     <button class="tab" data-panel="meca">🔧 Staff Mécanique</button>
     <button class="tab" data-panel="admin">📋 Liste complète</button>
     <button class="tab" data-panel="fiches">📇 Fiches membres</button>
+    <button class="tab" data-panel="secure-admin">🔐 Admin</button>
   </div>
 
   <!-- CHECK-IN -->
@@ -185,6 +198,32 @@ th{color:var(--muted);font-size:.72rem;text-transform:uppercase;}
           <thead><tr><th>Code</th><th>Prénom</th><th>Nom</th><th>Téléphone</th><th>Email</th><th>Filière</th><th>PC</th></tr></thead>
           <tbody id="fiches-body"><tr><td colspan="7" style="color:var(--muted);">Chargement...</td></tr></tbody>
         </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- SECURE ADMIN -->
+  <div class="panel" id="secure-admin">
+    <div class="card">
+      <h2><span class="bolt">›</span> Administration</h2>
+      <div id="admin-login-box" class="lockbox">
+        <div class="lock-icon">🔒</div>
+        <div class="hint">Accès réservé — entrer le mot de passe admin.</div>
+        <input id="admin-pass" type="password" placeholder="Mot de passe">
+        <button class="primary" onclick="adminLogin()">Se connecter</button>
+        <div id="admin-login-msg"></div>
+      </div>
+      <div id="admin-panel-content" style="display:none;">
+        <div class="admin-toolbar">
+          <button class="btn-sm" onclick="adminLogout()">🔒 Se déconnecter</button>
+        </div>
+        <div id="admin-secure-msg"></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Code</th><th>Prénom</th><th>Nom</th><th>Téléphone</th><th>Email</th><th>Filière</th><th>PC</th><th>Élec.</th><th>Méca.</th><th>Actions</th></tr></thead>
+            <tbody id="secure-admin-body"><tr><td colspan="10" style="color:var(--muted);">Chargement...</td></tr></tbody>
+          </table>
+        </div>
       </div>
     </div>
   </div>
@@ -344,6 +383,151 @@ function renderFiches(members){
   body.innerHTML = rows;
 }
 
+let adminAuthed = false;
+let adminPassword = '';
+let editingCode = null;
+
+async function adminLogin(){
+  const pass = document.getElementById('admin-pass').value;
+  const msg = document.getElementById('admin-login-msg');
+  msg.innerHTML = '';
+  if(!pass){ return; }
+  try{
+    const r = await fetch(API+'/api/admin/verify', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({password: pass})});
+    const d = await r.json();
+    if(!r.ok){
+      msg.innerHTML = '<div class="msg err">'+(d.error||'Mot de passe incorrect.')+'</div>';
+      return;
+    }
+    adminAuthed = true;
+    adminPassword = pass;
+    document.getElementById('admin-pass').value = '';
+    document.getElementById('admin-login-box').style.display='none';
+    document.getElementById('admin-panel-content').style.display='block';
+    renderSecureAdmin(allMembers);
+  }catch(e){
+    msg.innerHTML = '<div class="msg err">Serveur local introuvable.</div>';
+    setConn(false);
+  }
+}
+
+function adminLogout(){
+  adminAuthed = false;
+  adminPassword = '';
+  editingCode = null;
+  document.getElementById('admin-login-box').style.display='block';
+  document.getElementById('admin-panel-content').style.display='none';
+}
+
+function renderSecureAdmin(members){
+  if(!adminAuthed) return;
+  const body = document.getElementById('secure-admin-body');
+  if(!members || members.length===0){
+    body.innerHTML = '<tr><td colspan="10" style="color:var(--muted);">Aucun membre enregistré encore.</td></tr>';
+    return;
+  }
+  let rows = '';
+  members.forEach(d=>{
+    if(editingCode === d.code){
+      rows += `<tr>
+        <td><b style="color:var(--cyan);">${d.code}</b></td>
+        <td><input class="edit-input" id="edit-fn-${d.code}" value="${(d.firstName||'').replace(/"/g,'&quot;')}"></td>
+        <td><input class="edit-input" id="edit-ln-${d.code}" value="${(d.lastName||'').replace(/"/g,'&quot;')}"></td>
+        <td><input class="edit-input" id="edit-phone-${d.code}" value="${d.phone||''}"></td>
+        <td><input class="edit-input" id="edit-email-${d.code}" value="${(d.email||'').replace(/"/g,'&quot;')}"></td>
+        <td><input class="edit-input" id="edit-study-${d.code}" value="${(d.study||'').replace(/"/g,'&quot;')}"></td>
+        <td><input class="edit-input" id="edit-pc-${d.code}" value="${(d.pc||'').replace(/"/g,'&quot;')}"></td>
+        <td><label class="edit-check"><input type="checkbox" id="edit-elec-${d.code}" ${d.electrique?.done?'checked':''}> fait</label></td>
+        <td><label class="edit-check"><input type="checkbox" id="edit-meca-${d.code}" ${d.mecanique?.done?'checked':''}> fait</label></td>
+        <td>
+          <button class="btn-sm ok" onclick="adminSaveEdit('${d.code}')">💾 Sauver</button>
+          <button class="btn-sm" onclick="adminCancelEdit()">Annuler</button>
+        </td>
+      </tr>`;
+    } else {
+      const eOk = !!d.electrique?.done, mOk = !!d.mecanique?.done;
+      rows += `<tr>
+        <td><b style="color:var(--cyan);">${d.code}</b></td>
+        <td>${d.firstName||'—'}</td>
+        <td>${d.lastName||'—'}</td>
+        <td>${d.phone||'—'}</td>
+        <td>${d.email||'—'}</td>
+        <td>${d.study||'—'}</td>
+        <td>${d.pc||'—'}</td>
+        <td>${eOk?'<span class="badge ok">Fait</span>':'<span class="badge pending">Attente</span>'}</td>
+        <td>${mOk?'<span class="badge ok">Fait</span>':'<span class="badge pending">Attente</span>'}</td>
+        <td>
+          <button class="btn-sm" onclick="adminStartEdit('${d.code}')">✏️ Modifier</button>
+          <button class="btn-sm danger" onclick="adminDelete('${d.code}')">🗑️ Supprimer</button>
+        </td>
+      </tr>`;
+    }
+  });
+  body.innerHTML = rows;
+}
+
+function adminStartEdit(code){
+  editingCode = code;
+  renderSecureAdmin(allMembers);
+}
+
+function adminCancelEdit(){
+  editingCode = null;
+  renderSecureAdmin(allMembers);
+}
+
+async function adminSaveEdit(code){
+  const msg = document.getElementById('admin-secure-msg');
+  msg.innerHTML = '';
+  const payload = {
+    password: adminPassword,
+    code: code,
+    firstName: document.getElementById('edit-fn-'+code).value.trim(),
+    lastName: document.getElementById('edit-ln-'+code).value.trim(),
+    phone: document.getElementById('edit-phone-'+code).value.trim(),
+    email: document.getElementById('edit-email-'+code).value.trim(),
+    study: document.getElementById('edit-study-'+code).value.trim(),
+    pc: document.getElementById('edit-pc-'+code).value.trim(),
+    electrique: document.getElementById('edit-elec-'+code).checked,
+    mecanique: document.getElementById('edit-meca-'+code).checked
+  };
+  try{
+    const r = await fetch(API+'/api/admin/update', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+    const d = await r.json();
+    if(!r.ok){
+      if(r.status === 401){ msg.innerHTML = '<div class="msg err">Session admin invalide, reconnectez-vous.</div>'; adminLogout(); return; }
+      msg.innerHTML = '<div class="msg err">'+(d.error||'Erreur lors de la modification.')+'</div>';
+      return;
+    }
+    editingCode = null;
+    msg.innerHTML = '<div class="msg ok">Membre mis à jour.</div>';
+    refreshLists();
+  }catch(e){
+    msg.innerHTML = '<div class="msg err">Serveur local introuvable.</div>';
+    setConn(false);
+  }
+}
+
+async function adminDelete(code){
+  if(!confirm('Supprimer définitivement le membre '+code+' ? Cette action est irréversible.')) return;
+  const msg = document.getElementById('admin-secure-msg');
+  msg.innerHTML = '';
+  try{
+    const r = await fetch(API+'/api/admin/delete', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({password: adminPassword, code: code})});
+    const d = await r.json();
+    if(!r.ok){
+      if(r.status === 401){ msg.innerHTML = '<div class="msg err">Session admin invalide, reconnectez-vous.</div>'; adminLogout(); return; }
+      msg.innerHTML = '<div class="msg err">'+(d.error||'Erreur lors de la suppression.')+'</div>';
+      return;
+    }
+    msg.innerHTML = '<div class="msg ok">Membre supprimé.</div>';
+    refreshLists();
+  }catch(e){
+    msg.innerHTML = '<div class="msg err">Serveur local introuvable.</div>';
+    setConn(false);
+  }
+}
+
 async function refreshLists(){
   try{
     const r = await fetch(API+'/api/members');
@@ -352,6 +536,7 @@ async function refreshLists(){
     allMembers = members;
     renderAdmin(members);
     renderFiches(members);
+    if(adminAuthed) renderSecureAdmin(members);
     setConn(true);
   }catch(e){
     setConn(false);
