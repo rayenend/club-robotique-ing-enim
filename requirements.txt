@@ -1,0 +1,4 @@
+# Ce projet n'utilise que la bibliotheque standard de Python (json, sqlite3,
+# http.server, etc.) -- aucune dependance externe n'est necessaire.
+# Ce fichier reste present car certains hebergeurs (Render, Railway, etc.)
+# s'en servent pour detecter automatiquement qu'il s'agit d'une app Python.
